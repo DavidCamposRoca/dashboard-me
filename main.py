@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configuración de página
-st.set_page_config(page_title="Mundo Estudiante - Google Ads Performance", layout="wide")
+st.set_page_config(page_title="Mundo Estudiante - Business Intelligence", layout="wide")
 
 FILE = "Datos_Estaticos_ME_V1__Canvas.xlsx"
 
@@ -20,75 +19,66 @@ def load_data():
 try:
     df_leads, df_inv = load_data()
 
-    # --- LÓGICA DE IDENTIFICACIÓN G ADS ---
-    # Marcamos como GAds si tiene GCLID o si la columna SEM/SEO dice 'SEM'
-    df_leads['es_gads'] = (df_leads['GCLID'].notnull()) | (df_leads['SEM / SEO'] == 'SEM')
-
-    st.title("🎯 Rendimiento Específico: Google Ads")
-    
-    # --- FILTROS ---
+    # --- SELECTORES LATERALES ---
     with st.sidebar:
-        st.header("Configuración")
-        lista_meses = sorted(df_leads['MES_AÑO'].unique(), reverse=True)
-        periodo = st.selectbox("Seleccionar Periodo", ["Todos"] + lista_meses)
-        centros = st.multiselect("Centros", options=df_leads['Centro origen'].unique(), default=df_leads['Centro origen'].unique())
+        st.title("Configuración")
+        mes_sel = st.selectbox("Mes", ["Todos"] + sorted(df_leads['MES_AÑO'].unique(), reverse=True))
+        centros = st.multiselect("Centros", df_leads['Centro origen'].unique(), default=df_leads['Centro origen'].unique())
 
-    # Aplicar Filtros
+    # Filtrado base
     df_f_leads = df_leads[df_leads['Centro origen'].isin(centros)]
     df_f_inv = df_inv
-    if periodo != "Todos":
-        df_f_leads = df_f_leads[df_f_leads['MES_AÑO'] == periodo]
-        df_f_inv = df_inv[df_inv['MES_AÑO'] == periodo]
+    if mes_sel != "Todos":
+        df_f_leads = df_f_leads[df_f_leads['MES_AÑO'] == mes_sel]
+        df_f_inv = df_inv[df_inv['MES_AÑO'] == mes_sel]
 
-    # Datos filtrados SOLO para Google Ads
-    gads_leads = df_f_leads[df_f_leads['es_gads'] == True]
-    
-    # --- CÁLCULOS G ADS ---
-    n_leads = len(gads_leads)
-    n_clientes = len(gads_leads[gads_leads['Situacion actual'] == 'CLIENTE CAPTADO'])
-    inv_gads = df_f_inv['INVERSIÓN EN G ADS'].sum()
-    ingresos_gads = gads_leads['Valor total'].sum()
+    # --- CREACIÓN DE PESTAÑAS ---
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 General", "🔍 Google Ads", "📱 Meta (FB/IG)", "📈 SEO / Orgánico"])
 
-    # Métricas calculadas
-    cr = (n_clientes / n_leads * 100) if n_leads > 0 else 0
-    cpl = (inv_gads / n_leads) if n_leads > 0 else 0
-    cpa = (inv_gads / n_clientes) if n_clientes > 0 else 0
-    roas = (ingresos_gads / inv_gads) if inv_gads > 0 else 0
+    # --- TABS 1: GENERAL ---
+    with tab1:
+        st.header("Visión Global del Negocio")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Leads", len(df_f_leads))
+        c2.metric("Inversión Total", f"{df_f_inv['INVERSIÓN TOTAL'].sum():,.2f} €")
+        c3.metric("Ingresos Totales", f"{df_f_leads['Valor total'].sum():,.2f} €")
+        
+        st.plotly_chart(px.line(df_f_leads.groupby('MES_AÑO').size().reset_index(), x='MES_AÑO', y=0, title="Tendencia de Captación"), use_container_width=True)
 
-    # --- VISUALIZACIÓN KPIs ---
-    st.subheader(f"Métricas Google Ads - {periodo}")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    
-    c1.metric("Leads G Ads", f"{n_leads}")
-    c2.metric("Clientes (Captados)", f"{n_clientes}")
-    c3.metric("CPL (Coste Lead)", f"{cpl:.2f} €")
-    c4.metric("CR (Tasa Conv.)", f"{cr:.1f}%")
-    c5.metric("ROAS", f"{roas:.2f}x")
+    # --- TABS 2: GOOGLE ADS ---
+    with tab2:
+        st.header("Rendimiento Google Ads")
+        # Lógica: GCLID existe o marca SEM
+        gads = df_f_leads[(df_f_leads['GCLID'].notnull()) | (df_f_leads['SEM / SEO'] == 'SEM')]
+        inversion_gads = df_f_inv['INVERSIÓN EN G ADS'].sum()
+        
+        c1, c2, c4 = st.columns(3)
+        c1.metric("Leads GAds", len(gads))
+        c2.metric("Inversión", f"{inversion_gads:,.2f} €")
+        c4.metric("CPL", f"{(inversion_gads/len(gads)) if len(gads)>0 else 0:.2f} €")
+        
+        st.plotly_chart(px.bar(gads['Centro origen'].value_counts().reset_index(), x='Centro origen', y='count', title="Leads GAds por Centro"), use_container_width=True)
 
-    st.markdown("---")
+    # --- TABS 3: META ---
+    with tab3:
+        st.header("Rendimiento Meta (Facebook/Instagram)")
+        # Lógica: Basado en inversión de Meta y origen conocido
+        inversion_meta = df_f_inv['INVERSIÓN EN META'].sum()
+        st.metric("Inversión en Meta", f"{inversion_meta:,.2f} €")
+        st.info("Aquí puedes filtrar por 'Como conoce' == 'Facebook' o 'Instagram'")
 
-    col_izq, col_der = st.columns(2)
-
-    with col_izq:
-        st.write("### 💸 Inversión vs Ingresos G Ads")
-        df_money = pd.DataFrame({
-            'Concepto': ['Inversión G Ads', 'Ingresos Generados'],
-            'Euros': [inv_gads, ingresos_gads]
-        })
-        fig_money = px.bar(df_money, x='Concepto', y='Euros', color='Concepto', text_auto='.2s')
-        st.plotly_chart(fig_money, use_container_width=True)
-
-    with col_der:
-        st.write("### 🏢 Leads G Ads por Centro")
-        fig_centro = px.pie(gads_leads, names='Centro origen', hole=0.4)
-        st.plotly_chart(fig_centro, use_container_width=True)
-
-    # --- TABLA DE CAUSAS DE PÉRDIDA ---
-    st.write("### ❌ ¿Por qué perdemos leads de Google Ads?")
-    perdidios = gads_leads[gads_leads['Situacion actual'] == 'CLIENTE PERDIDO']
-    causas = perdidios['Causa perdido'].value_counts().reset_index()
-    fig_causas = px.bar(causas, x='count', y='Causa perdido', orientation='h', title="Top Causas de Perdida")
-    st.plotly_chart(fig_causas, use_container_width=True)
+    # --- TABS 4: SEO ---
+    with tab4:
+        st.header("Rendimiento SEO (Tráfico Gratis)")
+        # Lógica: El campo SEM / SEO dice SEO
+        seo_leads = df_f_leads[df_f_leads['SEM / SEO'] == 'SEO']
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Leads SEO", len(seo_leads))
+        c2.metric("Coste SEO", "0.00 €", help="El SEO es captación orgánica sin pago directo por lead")
+        
+        st.write("### Top Páginas de Entrada SEO")
+        st.dataframe(seo_leads['URL'].value_counts().head(10))
 
 except Exception as e:
-    st.error(f"Error técnico: {e}")
+    st.error(f"Error: {e}")
