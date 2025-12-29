@@ -2,104 +2,93 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configuración profesional
-st.set_page_config(page_title="BI Mundo Estudiante", layout="wide")
+# Configuración de página
+st.set_page_config(page_title="Mundo Estudiante - Google Ads Performance", layout="wide")
 
-# Nombre exacto de tu archivo subido
 FILE = "Datos_Estaticos_ME_V1__Canvas.xlsx"
 
 @st.cache_data
 def load_data():
-    # Cargamos las pestañas
     leads = pd.read_excel(FILE, sheet_name='Total_Datos_ME')
     inv = pd.read_excel(FILE, sheet_name='Inversion')
-    
-    # Aseguramos que el periodo sea formato fecha
     leads['PERIODO'] = pd.to_datetime(leads['PERIODO'])
     inv['PERIODO'] = pd.to_datetime(inv['PERIODO'])
-    
-    # Creamos una columna de texto para el selector (Ej: "2025-10")
     leads['MES_AÑO'] = leads['PERIODO'].dt.strftime('%Y-%m')
     inv['MES_AÑO'] = inv['PERIODO'].dt.strftime('%Y-%m')
-    
     return leads, inv
 
 try:
     df_leads, df_inv = load_data()
 
-    st.title("📊 Dashboard de Marketing - Mundo Estudiante")
+    # --- LÓGICA DE IDENTIFICACIÓN G ADS ---
+    # Marcamos como GAds si tiene GCLID o si la columna SEM/SEO dice 'SEM'
+    df_leads['es_gads'] = (df_leads['GCLID'].notnull()) | (df_leads['SEM / SEO'] == 'SEM')
+
+    st.title("🎯 Rendimiento Específico: Google Ads")
     
-    # --- BARRA LATERAL (FILTROS) ---
+    # --- FILTROS ---
     with st.sidebar:
-        st.header("🔍 Filtros de Análisis")
-        
-        # 1. Filtro de Periodo - AHORA ES UN DESPLEGABLE
+        st.header("Configuración")
         lista_meses = sorted(df_leads['MES_AÑO'].unique(), reverse=True)
-        opciones_periodo = ["Todos los meses"] + lista_meses
-        
-        periodo_seleccionado = st.selectbox(
-            "Selecciona el Periodo",
-            options=opciones_periodo
-        )
-        
-        # 2. Filtro de Centros
-        centros = st.multiselect(
-            "Seleccionar Centros", 
-            options=df_leads['Centro origen'].unique(), 
-            default=df_leads['Centro origen'].unique()
-        )
+        periodo = st.selectbox("Seleccionar Periodo", ["Todos"] + lista_meses)
+        centros = st.multiselect("Centros", options=df_leads['Centro origen'].unique(), default=df_leads['Centro origen'].unique())
 
-    # --- APLICAR FILTROS A LOS DATOS ---
-    if periodo_seleccionado == "Todos los meses":
-        df_f_leads = df_leads[df_leads['Centro origen'].isin(centros)]
-        df_f_inv = df_inv
-    else:
-        df_f_leads = df_leads[(df_leads['MES_AÑO'] == periodo_seleccionado) & (df_leads['Centro origen'].isin(centros))]
-        df_f_inv = df_inv[df_inv['MES_AÑO'] == periodo_seleccionado]
+    # Aplicar Filtros
+    df_f_leads = df_leads[df_leads['Centro origen'].isin(centros)]
+    df_f_inv = df_inv
+    if periodo != "Todos":
+        df_f_leads = df_f_leads[df_f_leads['MES_AÑO'] == periodo]
+        df_f_inv = df_inv[df_inv['MES_AÑO'] == periodo]
 
-    # --- MÉTRICAS (KPIs) ---
-    c1, c2, c3, c4 = st.columns(4)
+    # Datos filtrados SOLO para Google Ads
+    gads_leads = df_f_leads[df_f_leads['es_gads'] == True]
     
-    total_l = len(df_f_leads)
-    inv_t = df_f_inv['INVERSIÓN TOTAL'].sum()
-    captados = len(df_f_leads[df_f_leads['Situacion actual'] == 'CLIENTE CAPTADO'])
-    cpl = inv_t / total_l if total_l > 0 else 0
+    # --- CÁLCULOS G ADS ---
+    n_leads = len(gads_leads)
+    n_clientes = len(gads_leads[gads_leads['Situacion actual'] == 'CLIENTE CAPTADO'])
+    inv_gads = df_f_inv['INVERSIÓN EN G ADS'].sum()
+    ingresos_gads = gads_leads['Valor total'].sum()
 
-    c1.metric("Leads", f"{total_l:,}")
-    c2.metric("Inversión", f"{inv_t:,.2f} €")
-    c3.metric("Clientes Captados", f"{captados}")
-    c4.metric("CPL (Coste/Lead)", f"{cpl:.2f} €")
+    # Métricas calculadas
+    cr = (n_clientes / n_leads * 100) if n_leads > 0 else 0
+    cpl = (inv_gads / n_leads) if n_leads > 0 else 0
+    cpa = (inv_gads / n_clientes) if n_clientes > 0 else 0
+    roas = (ingresos_gads / inv_gads) if inv_gads > 0 else 0
+
+    # --- VISUALIZACIÓN KPIs ---
+    st.subheader(f"Métricas Google Ads - {periodo}")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    
+    c1.metric("Leads G Ads", f"{n_leads}")
+    c2.metric("Clientes (Captados)", f"{n_clientes}")
+    c3.metric("CPL (Coste Lead)", f"{cpl:.2f} €")
+    c4.metric("CR (Tasa Conv.)", f"{cr:.1f}%")
+    c5.metric("ROAS", f"{roas:.2f}x")
 
     st.markdown("---")
 
-    # --- GRÁFICOS ---
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        st.subheader("Captación por Centro")
-        fig1 = px.bar(
-            df_f_leads['Centro origen'].value_counts().reset_index(), 
-            x='Centro origen', y='count', 
-            color='Centro origen',
-            text_auto=True
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-        
-    with col_b:
-        st.subheader("Inversión por Canal")
-        canales = ['INVERSIÓN EN G ADS', 'INVERSIÓN EN META', 'INVERSIÓN EN TIKTOK', 'INVERSIÓN AFILIACION']
-        inv_canales = df_f_inv[canales].sum().reset_index()
-        inv_canales.columns = ['Canal', 'Euros']
-        fig2 = px.pie(inv_canales, values='Euros', names='Canal', hole=0.5)
-        st.plotly_chart(fig2, use_container_width=True)
+    col_izq, col_der = st.columns(2)
 
-    # --- EVOLUCIÓN TEMPORAL ---
-    st.subheader("Evolución Mensual")
-    evolucion = df_f_leads.groupby('MES_AÑO').size().reset_index(name='Cantidad')
-    # Ordenar para que la línea de tiempo tenga sentido
-    evolucion = evolucion.sort_values('MES_AÑO')
-    fig3 = px.line(evolucion, x='MES_AÑO', y='Cantidad', markers=True, title="Tendencia de Leads")
-    st.plotly_chart(fig3, use_container_width=True)
+    with col_izq:
+        st.write("### 💸 Inversión vs Ingresos G Ads")
+        df_money = pd.DataFrame({
+            'Concepto': ['Inversión G Ads', 'Ingresos Generados'],
+            'Euros': [inv_gads, ingresos_gads]
+        })
+        fig_money = px.bar(df_money, x='Concepto', y='Euros', color='Concepto', text_auto='.2s')
+        st.plotly_chart(fig_money, use_container_width=True)
+
+    with col_der:
+        st.write("### 🏢 Leads G Ads por Centro")
+        fig_centro = px.pie(gads_leads, names='Centro origen', hole=0.4)
+        st.plotly_chart(fig_centro, use_container_width=True)
+
+    # --- TABLA DE CAUSAS DE PÉRDIDA ---
+    st.write("### ❌ ¿Por qué perdemos leads de Google Ads?")
+    perdidios = gads_leads[gads_leads['Situacion actual'] == 'CLIENTE PERDIDO']
+    causas = perdidios['Causa perdido'].value_counts().reset_index()
+    fig_causas = px.bar(causas, x='count', y='Causa perdido', orientation='h', title="Top Causas de Perdida")
+    st.plotly_chart(fig_causas, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error técnico: {e}")
