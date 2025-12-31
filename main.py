@@ -3,8 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Configuración profesional
-st.set_page_config(page_title="Mundo Estudiante - Business Intelligence", layout="wide")
+st.set_page_config(page_title="ME - Ultra BI Suite", layout="wide", initial_sidebar_state="expanded")
 
 FILE = "Datos_Estaticos_ME_V1__Canvas.xlsx"
 
@@ -17,14 +16,15 @@ def load_data():
         leads = pd.read_csv('Datos_Estaticos_ME_V1__Canvas.xlsx - Total_Datos_ME.csv')
         inv = pd.read_csv('Datos_Estaticos_ME_V1__Canvas.xlsx - Inversion.csv')
     
-    # Procesamiento de Fechas
     leads['PERIODO'] = pd.to_datetime(leads['PERIODO'])
     leads['MES_AÑO'] = leads['PERIODO'].dt.strftime('%Y-%m')
     leads['DIA_SEMANA'] = leads['PERIODO'].dt.day_name()
+    leads['HORA'] = leads['PERIODO'].dt.hour # Si tienes la hora en el Excel
+    
     inv['PERIODO'] = pd.to_datetime(inv['PERIODO'])
     inv['MES_AÑO'] = inv['PERIODO'].dt.strftime('%Y-%m')
 
-    # Lógica de Canales (Atribución)
+    # Lógica de Canales
     leads['Canal_Final'] = 'Otros / Orgánico'
     leads.loc[(leads['GCLID'].notnull()) | (leads['SEM / SEO'].str.contains('SEM', na=False)), 'Canal_Final'] = 'Google Ads'
     leads.loc[(leads['URL'].str.contains('meta|facebook|instagram', case=False, na=False)) | (leads['Telekos'].str.contains('facebook', case=False, na=False)), 'Canal_Final'] = 'Meta Ads'
@@ -35,92 +35,95 @@ def load_data():
 try:
     df_leads, df_inv = load_data()
 
-    # --- CENTRO DE CONTROL (SIDEBAR) ---
     with st.sidebar:
         st.header("🎮 Centro de Control")
         mes_sel = st.selectbox("📅 Periodo", ["Histórico"] + sorted(df_leads['MES_AÑO'].unique(), reverse=True))
         sedes_sel = st.multiselect("📍 Sedes", df_leads['Centro origen'].unique(), default=df_leads['Centro origen'].unique())
         canal_sel = st.multiselect("📣 Canales", df_leads['Canal_Final'].unique(), default=df_leads['Canal_Final'].unique())
 
-    # Filtros Dinámicos
+    # Filtrado
     f_leads = df_leads[(df_leads['Centro origen'].isin(sedes_sel)) & (df_leads['Canal_Final'].isin(canal_sel))].copy()
     f_inv = df_inv
     if mes_sel != "Histórico":
         f_leads = f_leads[f_leads['MES_AÑO'] == mes_sel]
         f_inv = df_inv[df_inv['MES_AÑO'] == mes_sel]
 
-    # --- MÉTRICAS GENERALES ---
-    l_tot, l_pru, l_cap = len(f_leads), len(f_leads[f_leads['Vino a prueba'] == 'Si']), len(f_leads[f_leads['Situacion actual'] == 'CLIENTE CAPTADO'])
-    ing_t, inv_t = f_leads['Valor total'].sum(), f_inv['INVERSIÓN TOTAL'].sum()
+    st.title(f"🚀 Business Intelligence - Mundo Estudiante")
+    st.markdown(f"**Analizando:** {mes_sel} | {', '.join(sedes_sel[:2])}... | {len(f_leads)} Leads")
 
-    st.title(f"📈 Inteligencia de Negocio: {mes_sel}")
-
-    # --- PESTAÑAS ---
     t1, t2, t3, t4, t5, t6, t7 = st.tabs([
         "🌪️ ROI Global", "🚫 No Válidos", "📉 Perdidos", "🏢 Sedes", "📞 Contacto", "🙋 Atribución", "📈 Tendencias"
     ])
 
-    # T1: ROI Y FUNNEL
+    # --- PESTAÑA 1: ROI Y FUNNEL ---
     with t1:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ingresos", f"{ing_t:,.0f}€")
-        c2.metric("Inversión", f"{inv_t:,.0f}€")
-        c3.metric("ROAS", f"{(ing_t/inv_t if inv_t>0 else 0):.2f}x")
-        c4.metric("CPL Medio", f"{(inv_t/l_tot if l_tot>0 else 0):.2f}€")
+        st.header("Análisis de Rentabilidad (ROI)")
+        ing_t, inv_t = f_leads['Valor total'].sum(), f_inv['INVERSIÓN TOTAL'].sum()
+        l_cap = len(f_leads[f_leads['Situacion actual'] == 'CLIENTE CAPTADO'])
         
-        fig_fun = go.Figure(go.Funnel(y=["Leads", "Pruebas", "Ventas"], x=[l_tot, l_pru, l_cap], textinfo="value+percent initial"))
-        st.plotly_chart(fig_fun, use_container_width=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Ingresos Reales", f"{ing_t:,.0f}€")
+        c2.metric("Inversión Ads", f"{inv_t:,.0f}€")
+        c3.metric("ROAS", f"{(ing_t/inv_t if inv_t>0 else 0):.2f}x")
+        c4.metric("Coste Adquisición (CAC)", f"{(inv_t/l_cap if l_cap>0 else 0):.2f}€")
 
-    # T2: NO VÁLIDOS
+        st.markdown("---")
+        st.subheader("Embudo de Conversión Detallado")
+        fig_f = go.Figure(go.Funnel(
+            y=["Leads", "Pruebas", "Ventas"], 
+            x=[len(f_leads), len(f_leads[f_leads['Vino a prueba'] == 'Si']), l_cap],
+            textinfo="value+percent initial"))
+        st.plotly_chart(fig_f, use_container_width=True)
+
+        st.subheader("💰 Distribución de Ingresos por Canal")
+        fig_rev = px.bar(f_leads.groupby('Canal_Final')['Valor total'].sum().reset_index(), 
+                         x='Canal_Final', y='Valor total', color='Canal_Final', text_auto='.2s')
+        st.plotly_chart(fig_rev, use_container_width=True)
+
+    # --- PESTAÑA 2: NO VÁLIDOS ---
     with t2:
+        st.header("Auditoría de Calidad")
         df_nv = f_leads[f_leads['Situacion actual'] == 'LEAD NO VALIDO']
-        st.subheader(f"Análisis de leads descartados ({len(df_nv)})")
+        
         col_nv1, col_nv2 = st.columns(2)
         with col_nv1:
-            st.plotly_chart(px.pie(df_nv, names='Canal_Final', title="Descartes por Canal"), use_container_width=True)
+            st.plotly_chart(px.pie(df_nv, names='Canal_Final', title="Inválidos por Canal"), use_container_width=True)
         with col_nv2:
-            st.plotly_chart(px.bar(df_nv['Causa perdido'].value_counts().reset_index(), x='count', y='Causa perdido', orientation='h', title="Motivos Técnicos"), use_container_width=True)
+            st.plotly_chart(px.bar(df_nv['Centro origen'].value_counts().reset_index(), x='count', y='Centro origen', orientation='h', title="Inválidos por Sede"), use_container_width=True)
+        
+        st.markdown("---")
+        st.subheader("Razones de Descarte (Lead No Válido)")
+        fig_cause = px.treemap(df_nv, path=['Causa perdido', 'Canal_Final'], title="Mapa de Causas y Origen")
+        st.plotly_chart(fig_cause, use_container_width=True)
 
-    # T3: PERDIDOS
+    # --- PESTAÑA 3: PERDIDOS ---
     with t3:
+        st.header("Análisis de Ventas Perdidas")
         df_per = f_leads[f_leads['Situacion actual'] == 'CLIENTE PERDIDO']
-        st.error(f"Ventas No Cerradas (Potencial): {df_per['Valor total'].sum():,.0f}€")
-        st.plotly_chart(px.bar(df_per['Causa perdido'].value_counts().head(10).reset_index(), x='count', y='Causa perdido', orientation='h', title="Motivos de Pérdida Comercial"), use_container_width=True)
+        st.error(f"Fuga Total de Ingresos: {df_per['Valor total'].sum():,.0f}€")
+        
+        st.plotly_chart(px.bar(df_per['Causa perdido'].value_counts().head(10).reset_index(), 
+                               x='count', y='Causa perdido', orientation='h', color='count'), use_container_width=True)
+        
+        st.markdown("---")
+        st.subheader("Pérdida por Canal de Captación")
+        fig_per_can = px.box(df_per, x='Canal_Final', y='Valor total', points="all", title="Dispersión del Valor Perdido por Canal")
+        st.plotly_chart(fig_per_can, use_container_width=True)
 
-    # T4: SEDES
+    # --- PESTAÑA 4: SEDES ---
     with t4:
-        st.subheader("Rendimiento por Academia")
-        sede_stats = f_leads.groupby('Centro origen').agg({'Identificador':'count', 'Valor total':'sum', 'Vino a prueba': lambda x: (x=='Si').sum()}).reset_index()
-        sede_stats.columns = ['Sede', 'Leads', 'Ventas', 'Pruebas']
-        st.plotly_chart(px.bar(sede_stats, x='Sede', y='Leads', color='Ventas', text_auto=True, title="Captación y Facturación"), use_container_width=True)
-        st.write("### Tabla Detallada")
-        st.dataframe(sede_stats, use_container_width=True)
+        st.header("Ranking y Comparativa de Sedes")
+        sede_stats = f_leads.groupby('Centro origen').agg({
+            'Identificador': 'count', 
+            'Valor total': 'sum', 
+            'Vino a prueba': lambda x: (x=='Si').sum(),
+            'Situacion actual': lambda x: (x=='CLIENTE CAPTADO').sum()
+        }).reset_index()
+        sede_stats.columns = ['Sede', 'Leads', 'Ventas', 'Pruebas', 'Captados']
+        sede_stats['Ratio_Venta'] = (sede_stats['Captados'] / sede_stats['Leads'] * 100).round(1)
 
-    # T5: CONTACTO
-    with t5:
-        st.subheader("Análisis de Formas de Contacto")
-        df_c = f_leads.dropna(subset=['Forma contacto'])
-        st.plotly_chart(px.pie(df_c, names='Forma contacto', title="¿Cómo llegan los leads?"), use_container_width=True)
-        st.plotly_chart(px.box(f_leads, x="Forma contacto", y="Valor total", title="Valor del Lead según Canal"), use_container_width=True)
-
-    # T6: ATRIBUCIÓN
-    with t6:
-        st.subheader("¿Cómo nos conocen?")
-        st.plotly_chart(px.pie(f_leads, names='Como conoce', hole=0.3), use_container_width=True)
-        st.write("### Top URLs por Ingresos")
-        st.table(f_leads.groupby('URL')['Valor total'].sum().sort_values(ascending=False).head(10))
-
-    # T7: TENDENCIAS
-    with t7:
-        st.subheader("Patrones Temporales")
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            dias_orden = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            fig_d = px.bar(f_leads['DIA_SEMANA'].value_counts().reindex(dias_orden).reset_index(), x='DIA_SEMANA', y='count', title="Leads por Día de la Semana")
-            st.plotly_chart(fig_d, use_container_width=True)
-        with col_t2:
-            evol_v = f_leads.groupby('MES_AÑO')['Valor total'].sum().reset_index()
-            st.plotly_chart(px.line(evol_v, x='MES_AÑO', y='Valor total', title="Evolución Mensual de Ingresos", markers=True), use_container_width=True)
-
-except Exception as e:
-    st.error(f"Error técnico: {e}")
+        st.dataframe(sede_stats.sort_values('Ventas', ascending=False), use_container_width=True)
+        
+        st.markdown("---")
+        st.subheader("Eficiencia de Cierre por Sede (%)")
+        st.plotly_chart(px.bar(sede_stats
